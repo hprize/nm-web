@@ -1,0 +1,10 @@
+// nmweb 그룹에게 NetworkManager 연결 관리 권한만 허용
+polkit.addRule(function (action, subject) {
+    var allowed = [
+        "org.freedesktop.NetworkManager.settings.modify.system",
+        "org.freedesktop.NetworkManager.network-control"
+    ];
+    if (allowed.indexOf(action.id) >= 0 && subject.isInGroup("nmweb")) {
+        return polkit.Result.YES;
+    }
+});

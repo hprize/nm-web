@@ -1,0 +1,34 @@
+# nm-web systemd 서비스 (docs/DEPLOY.md 4번에서 /etc/systemd/system/ 으로 복사)
+[Unit]
+Description=nm-web - nmcli 유선 연결 프로파일 관리 웹앱 (127.0.0.1 전용)
+After=network.target NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+# root 가 아닌 전용 사용자로 실행 — 권한은 polkit 규칙(50-nmweb.rules)으로 딱 2개만
+User=nmweb
+Group=nmweb
+WorkingDirectory=/opt/nm-web
+Environment=PORT=8080
+ExecStart=/usr/bin/node /opt/nm-web/server.js
+Restart=on-failure
+RestartSec=3
+
+# 실행 기록 폴더: /var/log/nm-web (systemd 가 만들고 nmweb 에게 쓰기 권한을 줌, LOGS_DIRECTORY 로 앱에 전달)
+LogsDirectory=nm-web
+LogsDirectoryMode=0750
+
+# 보안 강화: 앱이 파일 시스템을 바꾸지 못하게 하고, 특별 권한을 얻지 못하게
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+[Install]
+WantedBy=multi-user.target

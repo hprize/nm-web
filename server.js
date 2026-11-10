@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
 import express from 'express';
 import { createApiRouter } from './routes/api.js';
+import { startLogging, logFilePath } from './lib/log.js';
 
 // S-01: 바인딩 주소는 코드에 고정. 환경변수·설정 파일로 바꾸는 길을 만들지 않음
 const HOST = '127.0.0.1';
@@ -44,6 +45,7 @@ function readCookie(req, name) {
 
 export function createApp({ token }) {
   if (typeof token !== 'string' || token.length < 32) throw new Error('토큰이 너무 짧습니다');
+  startLogging(); // 실행 기록 시작 (F-11) — 여러 번 불러도 한 번만 시작
   const app = express();
   app.disable('x-powered-by'); // 서버 종류를 알려 줄 필요 없음
 
@@ -141,7 +143,7 @@ if (isMain) {
     const { url } = await startServer();
     console.log('nm-web 서버가 켜졌어요. 이 컴퓨터의 브라우저에서 아래 주소를 여세요:');
     console.log(`  ${url}`);
-    console.log(`(nmcli 실행 파일: ${process.env.NMCLI_BIN || 'nmcli'})`);
+    console.log(`(nmcli 실행 파일: ${process.env.NMCLI_BIN || 'nmcli'} / 실행 기록 파일: ${logFilePath() ?? '없음'})`);
   } catch (e) {
     console.error('[nm-web] 서버를 켜지 못했어요:', e.message);
     process.exit(1);

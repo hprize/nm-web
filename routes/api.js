@@ -8,6 +8,7 @@ import {
   validate, uuidSchema, createSchema, patchSchema, cloneSchema, upSchema, toNmcliArgs, toModifyArgs, patchProblems,
 } from '../lib/schema.js';
 import { hintFor, nmcliMessage, httpStatusFor } from '../lib/hints.js';
+import { getLogs, logFilePath, MAX_ENTRIES } from '../lib/log.js';
 import {
   LIST_ARGS, DEVICE_ARGS, STATUS_ARGS, detailArgs, parseList, parseDevices, parseStatus, parseDetail,
 } from '../lib/profile.js';
@@ -81,6 +82,16 @@ export function createApiRouter() {
     const { result, connection } = await readDetail(uuid);
     if (result.exitCode !== 0) return sendNmcliFail(res, result, 'show');
     sendOk(res, { connection }, result, '');
+  });
+
+  // F-11 실행 기록: 기본은 변경 명령만, ?all=1 이면 조회 명령도 (최근 100개, 새것부터)
+  router.get('/logs', (req, res) => {
+    const includeReads = req.query.all === '1';
+    res.json({
+      ok: true,
+      data: { logs: getLogs({ includeReads }), includeReads, max: MAX_ENTRIES, file: logFilePath() },
+      nmcli: null, // nmcli 를 실행하지 않는 앱 내부 기능
+    });
   });
 
   // ---------- 변경 API (F-03 ~ F-08) ----------

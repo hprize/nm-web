@@ -1,0 +1,440 @@
+#!/usr/bin/env node
+// ⚠️ 가짜 nmcli — 맥 개발·테스트 전용입니다. 진짜 네트워크는 전혀 건드리지 않습니다.
+// 맥에는 nmcli가 없어서, 진짜 nmcli 1.46과 "같은 모양"으로 출력하고 같은 종료 코드를 돌려주는
+// 흉내쟁이를 만들었습니다. 상태는 JSON 파일에 저장해서 add/modify/clone/delete 결과가 남습니다.
+//
+// 환경변수 (테스트용 스위치)
+//   FAKE_NMCLI_STATE      상태 파일 위치 (기본: dev/fake-state.json)
+//   FAKE_NMCLI_SLEEP_MS   명령마다 일부러 기다릴 시간(ms) — 대기열·시간 초과 테스트용
+//   FAKE_NMCLI_UP_SECONDS up 이 걸리는 가짜 시간(초) — -w 보다 크면 종료 코드 3
+//   FAKE_NMCLI_NM_DOWN    '1' 이면 NetworkManager 꺼짐(코드 8), 'dbus' 면 D-Bus까지 꺼짐(코드 1)
+
+import { readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { isIPv4, isIPv6 } from 'node:net';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const STATE_FILE = process.env.FAKE_NMCLI_STATE || path.join(here, 'fake-state.json');
+
+// ---------- 출력 도우미 ----------
+class NmError extends Error {
+  constructor(code, message) { super(message); this.code = code; }
+}
+const fail = (code, message) => { throw new NmError(code, message); };
+
+// 진짜 nmcli의 -t 출력처럼 ':' 와 '\' 앞에 '\' 를 붙임
+const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/:/g, '\\:');
+
+// ---------- 가짜 데이터 (실제 장비가 아님!) ----------
+// ens160 = VMware 1번 카드(평소 쓰는 연결), ens224 = 테스트용 2번 카드, lo = 루프백
+function defaultState() {
+  return {
+    nextActivePath: 3,
+    devices: [
+      { device: 'ens160', type: 'ethernet' },
+      { device: 'ens224', type: 'ethernet' },
+      { device: 'lo', type: 'loopback' },
+    ],
+    profiles: [
+      profile({
+        'connection.id': 'ens160', 'connection.uuid': '5fb06bd0-0bb0-7ffb-45f1-d6edd65f3e03',
+        'connection.interface-name': 'ens160', 'ipv4.method': 'auto',
+      }, 'ens160'),
+      profile({
+        'connection.id': 'lo', 'connection.uuid': 'b1a41c0e-36a5-4d1c-9a4c-2c9a7b1f0e11',
+        'connection.type': 'loopback', 'connection.interface-name': 'lo',
+        'ipv4.method': 'manual', 'ipv4.addresses': ['127.0.0.1/8'],
+        'ipv6.method': 'manual', 'ipv6.addresses': ['::1/128'],
+      }, 'lo'),
+      profile({
+        'connection.id': 'test-lan', 'connection.uuid': '3c2f6a8e-1d4b-4e5f-9a7b-8c6d5e4f3a21',
+        'connection.interface-name': 'ens224', 'connection.autoconnect': 'no',
+        'ipv4.method': 'manual', 'ipv4.addresses': ['192.168.56.50/24'], 'ipv4.gateway': '192.168.56.1',
+        'ipv6.method': 'disabled',
+      }, null),
+    ],
+  };
+}
+
+// 프로파일 한 개의 기본값. 목록형 값(주소·DNS)은 배열로 보관
+function profile(values, activeDevice) {
+  return {
+    'connection.id': '', 'connection.uuid': randomUUID(), 'connection.type': '802-3-ethernet',
+    'connection.interface-name': '', 'connection.autoconnect': 'yes', 'connection.autoconnect-priority': '0',
+    'ipv4.method': 'auto', 'ipv4.addresses': [], 'ipv4.gateway': '', 'ipv4.dns': [], 'ipv4.dns-search': [],
+    'ipv4.ignore-auto-dns': 'no',
+    'ipv6.method': 'auto', 'ipv6.addresses': [], 'ipv6.gateway': '', 'ipv6.dns': [],
+    '802-3-ethernet.mtu': 'auto', '802-3-ethernet.mac-address': '', '802-3-ethernet.cloned-mac-address': '',
+    ...values,
+    _active: activeDevice,
+  };
+}
+
+function loadState() {
+  if (!existsSync(STATE_FILE)) return defaultState();
+  return JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+}
+function saveState(state) {
+  // 임시 파일에 쓴 뒤 이름을 바꿔서, 중간에 끊겨도 파일이 깨지지 않게 함
+  const tmp = STATE_FILE + '.tmp';
+  writeFileSync(tmp, JSON.stringify(state, null, 2));
+  renameSync(tmp, STATE_FILE);
+}
+
+// ---------- 속성 규칙 (진짜 nmcli가 받아 주는 값만) ----------
+const ALIASES = {
+  'con-name': 'connection.id', type: 'connection.type', ifname: 'connection.interface-name',
+  autoconnect: 'connection.autoconnect', ip4: 'ipv4.addresses', gw4: 'ipv4.gateway',
+  ip6: 'ipv6.addresses', gw6: 'ipv6.gateway', mtu: '802-3-ethernet.mtu',
+  mac: '802-3-ethernet.mac-address', 'cloned-mac': '802-3-ethernet.cloned-mac-address',
+};
+const LIST_PROPS = new Set(['ipv4.addresses', 'ipv4.dns', 'ipv4.dns-search', 'ipv6.addresses', 'ipv6.dns']);
+const BOOL_PROPS = new Set(['connection.autoconnect', 'ipv4.ignore-auto-dns']);
+const MAC_RE = /^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/;
+
+function canonical(name) {
+  if (ALIASES[name]) return ALIASES[name];
+  if (name.startsWith('ethernet.')) return '802-3-ethernet.' + name.slice('ethernet.'.length);
+  return name;
+}
+
+function checkAddr(prop, item, family) {
+  const [ip, prefix, extra] = item.split('/');
+  const ok = family === 4 ? isIPv4(ip) : isIPv6(ip);
+  const max = family === 4 ? 32 : 128;
+  if (!ok || extra !== undefined || (prefix !== undefined && !(/^\d+$/.test(prefix) && +prefix <= max))) {
+    fail(2, `Error: failed to modify ${prop}: invalid IP address: Invalid IPv${family} address '${item}'.`);
+  }
+  return prefix === undefined ? `${ip}/${max}` : item;
+}
+
+// 값 하나를 검사하고 저장용 모양으로 바꿈. 빈 문자열은 "기본값으로 되돌리기"
+function normalize(prop, raw, p) {
+  const empty = raw === '';
+  switch (prop) {
+    case 'connection.id':
+      if (empty) fail(2, `Error: failed to modify connection.id: property is empty.`);
+      return raw;
+    case 'connection.interface-name':
+      return raw;
+    case 'connection.autoconnect-priority':
+      if (empty) return '0';
+      if (!/^-?\d+$/.test(raw) || +raw < -999 || +raw > 999) {
+        fail(2, `Error: failed to modify connection.autoconnect-priority: '${raw}' is not valid; use <-999-999>.`);
+      }
+      return String(+raw);
+    case 'ipv4.method':
+    case 'ipv6.method': {
+      const allowed = prop === 'ipv4.method'
+        ? ['auto', 'manual', 'link-local', 'disabled', 'shared']
+        : ['auto', 'manual', 'dhcp', 'link-local', 'ignore', 'disabled', 'shared'];
+      if (!allowed.includes(raw)) {
+        fail(2, `Error: failed to modify ${prop}: '${raw}' not among [${allowed.join(', ')}].`);
+      }
+      return raw;
+    }
+    case 'ipv4.addresses': case 'ipv6.addresses': {
+      const fam = prop.startsWith('ipv4') ? 4 : 6;
+      return splitList(raw).map((a) => checkAddr(prop, a, fam));
+    }
+    case 'ipv4.dns': case 'ipv6.dns': {
+      const fam = prop.startsWith('ipv4') ? 4 : 6;
+      return splitList(raw).map((a) => {
+        if (!(fam === 4 ? isIPv4(a) : isIPv6(a))) {
+          fail(2, `Error: failed to modify ${prop}: invalid IPv${fam} address '${a}'.`);
+        }
+        return a;
+      });
+    }
+    case 'ipv4.dns-search':
+      return splitList(raw);
+    case 'ipv4.gateway': case 'ipv6.gateway': {
+      const fam = prop.startsWith('ipv4') ? 4 : 6;
+      if (!empty && !(fam === 4 ? isIPv4(raw) : isIPv6(raw))) {
+        fail(2, `Error: failed to modify ${prop}: invalid IP address: Invalid IPv${fam} address '${raw}'.`);
+      }
+      return raw;
+    }
+    case '802-3-ethernet.mtu':
+      if (empty || raw === '0' || raw === 'auto') return 'auto';
+      if (!/^\d+$/.test(raw)) fail(2, `Error: failed to modify 802-3-ethernet.mtu: '${raw}' is not a valid number.`);
+      return String(+raw);
+    case '802-3-ethernet.mac-address':
+      if (!empty && !MAC_RE.test(raw)) fail(2, `Error: failed to modify 802-3-ethernet.mac-address: '${raw}' is not a valid Ethernet MAC.`);
+      return raw.toUpperCase();
+    case '802-3-ethernet.cloned-mac-address':
+      if (empty || ['preserve', 'permanent', 'random', 'stable'].includes(raw)) return raw;
+      if (!MAC_RE.test(raw)) fail(2, `Error: failed to modify 802-3-ethernet.cloned-mac-address: '${raw}' is not a valid Ethernet MAC.`);
+      return raw.toUpperCase();
+    default:
+      if (BOOL_PROPS.has(prop)) {
+        if (empty) return prop === 'connection.autoconnect' ? 'yes' : 'no';
+        const v = raw.toLowerCase();
+        if (['yes', 'true', 'on'].includes(v)) return 'yes';
+        if (['no', 'false', 'off'].includes(v)) return 'no';
+        fail(2, `Error: failed to modify ${prop}: '${raw}' is not valid; use [true, false, yes, no, on, off].`);
+      }
+      // 진짜 nmcli도 모르는 속성은 거부함
+      fail(2, `Error: invalid property '${prop.split('.').pop()}': '${prop}' not among the known properties.`);
+  }
+}
+
+const splitList = (raw) => raw.split(/[\s,]+/).filter(Boolean);
+
+// add/modify 공통: "속성 값" 짝을 차례로 적용 (+속성 은 더하기, -속성 은 빼기)
+function applyPairs(p, pairs, { forAdd }) {
+  if (pairs.length % 2 !== 0) fail(2, `Error: value for '${pairs.at(-1)}' is missing.`);
+  for (let i = 0; i < pairs.length; i += 2) {
+    let name = pairs[i];
+    const raw = pairs[i + 1];
+    let mode = 'set';
+    if (name.startsWith('+')) { mode = 'add'; name = name.slice(1); }
+    else if (name.startsWith('-')) { mode = 'remove'; name = name.slice(1); }
+    const prop = canonical(name);
+
+    if (prop === 'connection.type') {
+      if (!forAdd) fail(2, `Error: failed to modify connection.type: the property can't be changed.`);
+      if (raw !== 'ethernet' && raw !== '802-3-ethernet') {
+        fail(2, `Error: invalid connection type; '${raw}' not supported by this fake nmcli.`);
+      }
+      p['connection.type'] = '802-3-ethernet';
+      continue;
+    }
+    if (prop === 'connection.uuid') fail(2, `Error: failed to modify connection.uuid: the property can't be changed.`);
+
+    const value = normalize(prop, raw, p);
+    if (LIST_PROPS.has(prop) && mode !== 'set') {
+      p[prop] = mode === 'add'
+        ? [...p[prop], ...value.filter((v) => !p[prop].includes(v))]
+        : p[prop].filter((v) => !value.includes(v));
+    } else {
+      p[prop] = value;
+    }
+  }
+}
+
+// 저장 직전에 진짜 NetworkManager가 하는 검사 흉내
+function verify(p) {
+  for (const fam of ['ipv4', 'ipv6']) {
+    if (p[`${fam}.method`] === 'manual' && p[`${fam}.addresses`].length === 0) {
+      return `${fam}.addresses: this property cannot be empty for 'method=manual'`;
+    }
+  }
+  return null;
+}
+
+// ---------- 인자 해석 ----------
+function parseGlobal(argv) {
+  const opt = { terse: false, fields: null, getValues: false, wait: null };
+  let i = 0;
+  for (; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '-t' || a === '--terse') opt.terse = true;
+    else if (a === '-f' || a === '--fields') opt.fields = argv[++i];
+    else if (a === '-g' || a === '--get-values') { opt.fields = argv[++i]; opt.getValues = true; opt.terse = true; }
+    else if (a === '-w' || a === '--wait') opt.wait = Number(argv[++i]);
+    else if (a === '-s' || a === '--show-secrets') { /* 유선에는 비밀값이 없어 무시 */ }
+    else if (a.startsWith('-')) fail(2, `Error: Option '${a}' is unknown, try 'nmcli -help'.`);
+    else break;
+  }
+  return { opt, rest: argv.slice(i) };
+}
+
+function findProfile(state, rest) {
+  // "uuid X", "id X", 또는 그냥 "X"(이름 또는 UUID)
+  let kind = null; let key = rest[0];
+  if (rest[0] === 'uuid' || rest[0] === 'id') { kind = rest[0]; key = rest[1]; }
+  if (key === undefined) fail(2, 'Error: no connection specified.');
+  const p = state.profiles.find((x) =>
+    (kind !== 'id' && x['connection.uuid'] === key) || (kind !== 'uuid' && x['connection.id'] === key));
+  return { p, key, used: kind ? 2 : 1 };
+}
+
+// ---------- 출력 ----------
+function printTable(rows, allFields, opt) {
+  const fields = opt.fields ? opt.fields.split(',') : allFields.slice(0, 4);
+  for (const f of fields) {
+    if (!allFields.includes(f)) fail(2, `Error: invalid field '${f}'; allowed fields: ${allFields.join(',')}.`);
+  }
+  const lines = rows.map((r) => fields.map((f) => (opt.terse ? esc(r[f] ?? '') : (r[f] || '--'))));
+  if (opt.terse) return lines.map((l) => l.join(':')).join('\n');
+  return [fields.join('  '), ...lines.map((l) => l.join('  '))].join('\n');
+}
+
+const SECTIONS = ['connection', 'ipv4', 'ipv6', '802-3-ethernet'];
+// 진짜 nmcli는 이 밖에도 속성을 많이 보여 줌 → 앱이 "필요한 것만 고르는지" 확인하려고 몇 개 넣어 둠
+const EXTRA = { 'connection.stable-id': '', 'connection.zone': '', 'ipv4.routes': '', 'ipv6.addr-gen-mode': 'eui64' };
+
+function showValue(p, prop) {
+  const v = p[prop];
+  return Array.isArray(v) ? v.join(',') : v;
+}
+
+function printDetail(p, opt) {
+  const wanted = (opt.fields || SECTIONS.join(',')).split(',');
+  const props = [...Object.keys(p).filter((k) => !k.startsWith('_')), ...Object.keys(EXTRA)];
+  const out = [];
+  for (const w of wanted) {
+    const name = w === 'ethernet' ? '802-3-ethernet' : w;
+    const matched = props.filter((k) => k === name || k.startsWith(name + '.'));
+    if (matched.length === 0 && !SECTIONS.includes(name)) fail(2, `Error: invalid field '${w}'.`);
+    for (const k of matched) {
+      if (k.startsWith('802-3-ethernet.') && p['connection.type'] !== '802-3-ethernet') continue;
+      const v = k in EXTRA ? EXTRA[k] : showValue(p, k);
+      if (opt.getValues) out.push(esc(v));
+      else if (opt.terse) out.push(`${k}:${esc(v)}`);
+      else out.push(`${(k + ':').padEnd(40)}${v || '--'}`);
+    }
+  }
+  return out.join('\n');
+}
+
+// ---------- 명령 ----------
+function run(argv) {
+  const { opt, rest } = parseGlobal(argv);
+  const [object, command, ...args] = rest;
+
+  if (process.env.FAKE_NMCLI_NM_DOWN === 'dbus') {
+    fail(1, 'Error: Could not create NMClient object: Could not connect: No such file or directory.');
+  }
+  if (process.env.FAKE_NMCLI_NM_DOWN === '1') fail(8, 'Error: NetworkManager is not running.');
+
+  const state = loadState();
+
+  if (object === 'general' && (command === 'status' || command === undefined)) {
+    const anyActive = state.profiles.some((p) => p._active && p['connection.type'] === '802-3-ethernet');
+    const row = { RUNNING: 'running', STATE: anyActive ? 'connected' : 'disconnected', CONNECTIVITY: anyActive ? 'full' : 'none', NETWORKING: 'enabled' };
+    return { out: printTable([row], ['RUNNING', 'STATE', 'CONNECTIVITY', 'NETWORKING'], { ...opt, fields: opt.fields || 'STATE,CONNECTIVITY' }) };
+  }
+
+  if (object === 'device' && (command === 'status' || command === undefined)) {
+    const rows = state.devices.map((d) => {
+      const active = state.profiles.find((p) => p._active === d.device);
+      return { DEVICE: d.device, TYPE: d.type, STATE: active ? (d.type === 'loopback' ? 'connected (externally)' : 'connected') : 'disconnected', CONNECTION: active ? active['connection.id'] : '' };
+    });
+    return { out: printTable(rows, ['DEVICE', 'TYPE', 'STATE', 'CONNECTION'], opt) };
+  }
+
+  if (object !== 'connection') fail(2, `Error: argument '${object}' not understood. (가짜 nmcli는 일부 명령만 흉내 냅니다)`);
+
+  switch (command) {
+    case 'show': {
+      if (args.length === 0) {
+        const rows = state.profiles.map((p) => ({
+          NAME: p['connection.id'], UUID: p['connection.uuid'], TYPE: p['connection.type'],
+          DEVICE: p._active || '', ACTIVE: p._active ? 'yes' : 'no',
+        }));
+        return { out: printTable(rows, ['NAME', 'UUID', 'TYPE', 'DEVICE', 'ACTIVE'], opt) };
+      }
+      const { p, key } = findProfile(state, args);
+      if (!p) fail(10, `Error: ${key} - no such connection profile.`);
+      return { out: printDetail(p, opt) };
+    }
+
+    case 'add': {
+      const p = profile({}, null);
+      p['connection.type'] = null;
+      applyPairs(p, args, { forAdd: true });
+      if (!p['connection.type']) fail(2, "Error: Failed to add 'ethernet' connection: connection.type: property is missing.");
+      if (!p['connection.id']) p['connection.id'] = 'ethernet' + (p['connection.interface-name'] ? '-' + p['connection.interface-name'] : '');
+      const problem = verify(p);
+      if (problem) fail(4, `Error: Failed to add '${p['connection.id']}' connection: ${problem}`);
+      state.profiles.push(p);
+      saveState(state);
+      return { out: `Connection '${p['connection.id']}' (${p['connection.uuid']}) successfully added.` };
+    }
+
+    case 'modify': {
+      const { p, key, used } = findProfile(state, args);
+      if (!p) fail(10, `Error: unknown connection '${key}'.`);
+      const copy = structuredClone(p);
+      applyPairs(copy, args.slice(used), { forAdd: false });
+      const problem = verify(copy);
+      if (problem) fail(1, `Error: Failed to modify connection '${p['connection.id']}': ${problem}`);
+      // modify 는 저장만 함 — 켜진 연결의 실제 상태(_active)는 그대로 (SPEC 2.3)
+      Object.assign(p, copy);
+      saveState(state);
+      return { out: '' };
+    }
+
+    case 'up': {
+      const { p, key, used } = findProfile(state, args);
+      if (!p) fail(10, `Error: unknown connection '${key}'.`);
+      let ifname = null;
+      const extra = args.slice(used);
+      if (extra[0] === 'ifname') ifname = extra[1];
+      const pinned = p['connection.interface-name'];
+      if (ifname && pinned && ifname !== pinned) {
+        fail(4, `Error: Connection activation failed: device '${ifname}' not compatible with connection '${p['connection.id']}'.`);
+      }
+      const wantType = p['connection.type'] === '802-3-ethernet' ? 'ethernet' : p['connection.type'];
+      let dev = ifname || pinned;
+      if (!dev) {
+        // 장치를 정하지 않으면 NetworkManager가 맞는 장치를 고름 (쓰고 있지 않은 장치 먼저)
+        const free = state.devices.filter((d) => d.type === wantType && !state.profiles.some((x) => x._active === d.device));
+        dev = (free[0] || state.devices.find((d) => d.type === wantType))?.device;
+      }
+      if (!dev || !state.devices.some((d) => d.device === dev)) {
+        fail(4, `Error: Connection activation failed: No suitable device found for this connection (device ${dev || ''} not available because device not found).`);
+      }
+      const needed = Number(process.env.FAKE_NMCLI_UP_SECONDS || 0);
+      const wait = opt.wait ?? 90;
+      if (needed > wait) fail(3, `Error: Timeout expired (${wait} seconds)`);
+      for (const other of state.profiles) if (other._active === dev) other._active = null;
+      p._active = dev;
+      const n = state.nextActivePath++;
+      saveState(state);
+      return { out: `Connection successfully activated (D-Bus active path: /org/freedesktop/NetworkManager/ActiveConnection/${n})` };
+    }
+
+    case 'down': {
+      const { p, key } = findProfile(state, args);
+      if (!p || !p._active) fail(10, `Error: '${key}' is not an active connection.\nError: no active connection provided.`);
+      p._active = null;
+      saveState(state);
+      return { out: `Connection '${p['connection.id']}' successfully deactivated (D-Bus active path: /org/freedesktop/NetworkManager/ActiveConnection/${state.nextActivePath - 1})` };
+    }
+
+    case 'delete': {
+      const { p, key } = findProfile(state, args);
+      if (!p) fail(10, `Error: unknown connection '${key}'.\nError: cannot delete unknown connection(s): '${key}'.`);
+      state.profiles = state.profiles.filter((x) => x !== p);
+      saveState(state);
+      return { out: `Connection '${p['connection.id']}' (${p['connection.uuid']}) successfully deleted.` };
+    }
+
+    case 'clone': {
+      const { p, key, used } = findProfile(state, args);
+      const newName = args[used];
+      if (!p) fail(10, `Error: unknown connection '${key}'.`);
+      if (newName === undefined) fail(2, 'Error: <new name> argument is missing.');
+      const c = { ...structuredClone(p), 'connection.id': newName, 'connection.uuid': randomUUID(), _active: null };
+      state.profiles.push(c);
+      saveState(state);
+      return { out: `${p['connection.id']} (${p['connection.uuid']}) cloned as ${newName} (${c['connection.uuid']}).` };
+    }
+
+    default:
+      fail(2, `Error: argument '${command}' not understood. (가짜 nmcli는 일부 명령만 흉내 냅니다)`);
+  }
+}
+
+// ---------- 시작 ----------
+const sleepMs = Number(process.env.FAKE_NMCLI_SLEEP_MS || 0);
+if (sleepMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, sleepMs);
+
+try {
+  const { out } = run(process.argv.slice(2));
+  if (out) process.stdout.write(out + '\n');
+  process.exitCode = 0;
+} catch (e) {
+  if (e instanceof NmError) {
+    process.stderr.write(e.message + '\n');
+    process.exitCode = e.code;
+  } else {
+    process.stderr.write(`Error: fake nmcli crashed: ${e.stack}\n`);
+    process.exitCode = 1;
+  }
+}

@@ -13,7 +13,7 @@ SPEC.md에 없거나 애매했던 부분을 아래처럼 정했습니다. 코드
 | 7 | HTTP 상태 코드 | 입력 오류 400 / 토큰 없음 401 / Host·Origin 403 / nmcli 코드 10 → 404 / 그 밖의 nmcli 실패 500. 본문은 항상 공통 형식 |
 | 8 | 확인 창 | 삭제만 이름 다시 입력. 해제는 확인 버튼 + 켜진 연결이면 경고 |
 | 9 | DNS | `ipv4.dns` 는 IPv4만, `ipv6.dns` 는 IPv6만, 각각 최대 3개 |
-| 10 | 추가 검사 규칙 | IPv6 주소 `node:net` 검사 + 접두사 0~128, MAC `xx:xx:xx:xx:xx:xx`, 우선순위 -999~999, IPv6 manual도 주소 필수 |
+| 10 | 추가 검사 규칙 | IPv6 주소 `node:net` 검사 + 접두사 0~128, MAC `xx:xx:xx:xx:xx:xx`, 우선순위 0~999 (S-07 때문에 음수 `-` 값은 받지 않음), IPv6 manual도 주소 필수 |
 | 11 | 비밀값 가리기 | 속성 이름에 `psk / password / secret / 802-1x` 가 들어가면 값 `***` |
 | 12 | 기록 파일 위치 | 기본 `logs/nm-web.log`, 환경변수 `LOG_DIR` 로 변경 (Rocky: systemd `LogsDirectory=` → `/var/log/nm-web`) |
 | 13 | 조회 명령 기록 | 파일에는 전부. 화면 패널은 기본으로 변경 명령만 보여 주고 "조회도 보기" 선택 가능 |

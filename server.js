@@ -55,7 +55,9 @@ export function createApp({ token }) {
       'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
-      'Referrer-Policy': 'no-referrer', // 주소창의 ?token= 이 다른 곳으로 새지 않게
+      // 주소의 ?token= 이 다른 사이트로 새지 않게 (같은 출처에만 Referer 를 보냄).
+      // 'no-referrer' 는 form 전송처럼 cors 모드가 아닌 요청에서 Origin 을 null 로 바꿀 수 있어(Fetch 표준) 피함
+      'Referrer-Policy': 'same-origin',
       'Cache-Control': 'no-store',
     });
     next();

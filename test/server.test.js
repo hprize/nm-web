@@ -73,6 +73,8 @@ test('정상 요청 → 200 + 보안 응답 헤더', async () => {
   assert.equal(r.headers['x-content-type-options'], 'nosniff');
   assert.equal(r.headers['x-frame-options'], 'DENY');
   assert.equal(r.headers['x-powered-by'], undefined);
+  // 토큰이 다른 사이트로 새지 않게 하면서, Origin 이 null 로 바뀌지 않는 정책
+  assert.equal(r.headers['referrer-policy'], 'same-origin');
   // 403 응답에도 보안 헤더가 붙어야 함
   const bad = await request(srv.port, { headers: { host: 'evil.example.com' } });
   assert.equal(bad.headers['x-frame-options'], 'DENY');

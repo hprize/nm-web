@@ -2,11 +2,44 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <title>nm-web</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nm-web — 유선 연결 관리</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <!-- 보안(CSP) 때문에 HTML 안에 style·script 를 직접 쓰지 않고 파일로만 불러옵니다 -->
   <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
 </head>
 <body>
-  <!-- 7단계에서 화면을 만듭니다 -->
-  <script type="module" src="app.js"></script>
+  <header class="topbar">
+    <h1><a href="#/">nm-web</a> <small>유선 연결 프로파일 관리</small></h1>
+    <div id="status" class="status" role="status" aria-live="polite">NetworkManager 상태 확인 중…</div>
+    <button type="button" id="status-refresh">상태 새로고침</button>
+  </header>
+
+  <div id="notice" class="notice" role="alert" hidden></div>
+
+  <!-- S-1 목록 / S-2 상세 / S-3 생성·편집 폼이 여기에 그려집니다 -->
+  <main id="view"><p class="muted">불러오는 중…</p></main>
+
+  <!-- S-5 실행 기록 패널 -->
+  <details id="log-panel" class="log-panel">
+    <summary>실행 기록 (앱이 실행한 nmcli 명령)</summary>
+    <div class="log-tools">
+      <label><input type="checkbox" id="log-all"> 조회 명령도 보기</label>
+      <button type="button" id="log-refresh">새로고침</button>
+      <button type="button" id="log-clear" title="화면에서만 지워요. 파일 기록은 남아요.">지우기</button>
+    </div>
+    <div id="log-body"></div>
+  </details>
+
+  <!-- 실행 중 표시: nmcli 는 한 번에 하나씩 실행되므로 끝날 때까지 버튼을 막아 둠 -->
+  <div id="busy" class="busy" hidden>
+    <div class="busy-box"><span class="spinner" aria-hidden="true"></span><span id="busy-text">실행 중…</span></div>
+  </div>
+
+  <!-- S-4 확인 창 -->
+  <dialog id="dialog"></dialog>
+
+  <noscript>이 화면은 JavaScript가 필요해요.</noscript>
 </body>
 </html>

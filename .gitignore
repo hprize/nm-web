@@ -1,0 +1,11 @@
+# 설치한 라이브러리 (npm ci 로 다시 받음)
+node_modules/
+# 실행 기록 파일 (F-11)
+logs/
+*.log
+# 가짜 nmcli 가 저장하는 상태 (개발용)
+dev/fake-state.json
+# 맥이 만드는 파일
+.DS_Store
+# 처음 지시문 (과제 결과물 아님)
+KICKOFF.md

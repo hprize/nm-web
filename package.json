@@ -1,0 +1,19 @@
+{
+  "name": "nm-web",
+  "version": "0.1.0",
+  "description": "nmcli 유선 연결 프로파일 관리 웹앱 (수업 과제)",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "NMCLI_BIN=dev/fake-nmcli node server.js",
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^5.3.0",
+    "zod": "^4.6.7"
+  }
+}

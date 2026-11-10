@@ -19,6 +19,8 @@
 | 2번 카드 이름 / 대역 | `nmcli device`, `ip -4 addr show ens224` | |
 | 권한 | `sudo -u nmweb nmcli general permissions` (두 줄 yes) | |
 | 테스트 | `cd /opt/nm-web && npm test` (fail 0) | |
+| 서비스 파일 검사 | `sudo systemd-analyze verify /etc/systemd/system/nm-web.service` (출력 없음) | |
+| 서비스 상태 | `systemctl status nm-web --no-pager` (active (running)) | |
 
 ## 1. 기능 (F-01 ~ F-11)
 

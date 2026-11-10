@@ -110,6 +110,7 @@ org.freedesktop.NetworkManager.settings.modify.system    yes
 
 ```bash
 $ sudo install -m 644 deploy/nm-web.service /etc/systemd/system/nm-web.service   # 서비스 파일 복사
+$ sudo systemd-analyze verify /etc/systemd/system/nm-web.service                 # 서비스 파일 검사 (아무것도 안 나오면 정상)
 $ sudo systemctl daemon-reload                     # systemd 가 새 파일을 읽게
 $ sudo systemctl enable --now nm-web               # 지금 켜고, 부팅할 때도 자동으로 켜기
 $ systemctl status nm-web --no-pager               # active (running) 이면 성공

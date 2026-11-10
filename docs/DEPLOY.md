@@ -84,7 +84,7 @@ $ sudo useradd -r -g nmweb -s /sbin/nologin nmweb       # 로그인할 수 없�
 앱 파일은 root 소유로 두고 `nmweb` 은 읽기만 합니다 (앱이 자기 코드를 바꿀 수 없게).
 
 ```bash
-$ sudo git clone <저장소 주소> /opt/nm-web     # <저장소 주소>: 맥에서 git push 한 저장소
+$ sudo git clone https://github.com/hprize/nm-web.git /opt/nm-web     # 맥에서 git push 한 저장소
 $ cd /opt/nm-web
 $ sudo npm ci                                   # package-lock.json 그대로 express·zod 설치
 $ npm test                                      # 가짜 nmcli 로 하는 전체 테스트 — 모두 pass 여야 함

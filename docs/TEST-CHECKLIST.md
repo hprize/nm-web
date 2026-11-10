@@ -2,6 +2,8 @@
 
 `docs/DEPLOY.md` 대로 설치한 뒤, 실제 nmcli로 하나씩 확인합니다. 결과 칸에 ✅ / ❌ 와 메모를 적으세요.
 
+> 이 표의 자동 확인 부분은 [`deploy/nmweb-vmtest.sh`](../deploy/nmweb-vmtest.sh) 로 한 번에 돌릴 수 있습니다 (사용법·결과: [TEST-RESULT.md](TEST-RESULT.md)). 화면에서만 보이는 항목(빨간 안내, 확인 창)은 브라우저로 직접 확인하세요.
+
 ## 꼭 지킬 규칙
 
 - 실험은 **2번 카드**(예: `ens224`)로만 합니다. 아래에서 `ens224` 는 1단계 `nmcli device` 로 확인한 2번 카드 이름으로 바꿔 읽으세요.

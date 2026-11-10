@@ -3,6 +3,8 @@
 SPEC 4장 P1 기능 11개와 7장 보안 요구사항 10개를 **어디서 구현했고, 어떤 테스트로 확인했는지** 정리했습니다.
 테스트는 모두 `npm test` 로 실행됩니다 (가짜 nmcli 사용). 화면은 `node dev/ui-check.mjs`(맥, 헤드리스 Chrome)로도 확인했습니다.
 
+**실제 환경 확인:** Rocky Linux 9.8 VMware 가상머신의 진짜 nmcli(NetworkManager 1.54.3)로 아래 기능·보안 항목을 모두 다시 확인했습니다 — 자동 54개 중 53개 통과(실패 0, 건너뛴 1개는 화면에서 직접 확인) + 화면 확인 9개 통과. 항목별 결과는 [TEST-RESULT.md](TEST-RESULT.md), 사용한 스크립트는 [`deploy/nmweb-vmtest.sh`](../deploy/nmweb-vmtest.sh) 입니다.
+
 ## 1. 기능 (SPEC 4장 P1)
 
 | ID | 기능 | 실행하는 nmcli | 구현 | 테스트 |

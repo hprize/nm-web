@@ -73,6 +73,8 @@ node dev/ui-check.mjs  # (선택) 헤드리스 Chrome 으로 화면을 끝까지
 
 ### Rocky Linux 9.8 (진짜 nmcli)
 
+> ✅ 실제 VMware 가상머신(Rocky 9.8, NetworkManager 1.54.3, Node.js 24)에서 확인을 마쳤습니다 → [docs/TEST-RESULT.md](docs/TEST-RESULT.md)
+
 [docs/DEPLOY.md](docs/DEPLOY.md) 를 순서대로 따라 하고, [docs/TEST-CHECKLIST.md](docs/TEST-CHECKLIST.md) 로 확인합니다.
 요약: 전용 사용자 `nmweb` + polkit 규칙 → `/opt/nm-web` 에 받기 → `npm ci` → systemd 서비스 → `journalctl` 에서 접속 주소 확인.
 
@@ -112,8 +114,8 @@ nm-web/
 ├── public/              # 화면: index.html, app.js, formlogic.js, rules.js(서버와 공유), style.css …
 ├── test/                # node:test 테스트 (npm test)
 ├── dev/                 # 가짜 nmcli, 화면 점검 도구 (맥 개발용)
-├── deploy/              # polkit 규칙, systemd 서비스 (Rocky 용)
-└── docs/                # SPEC(명세), TASKS(작업 순서), DECISIONS(보충 결정), DEPLOY, TEST-CHECKLIST, CHECK(대조표)
+├── deploy/              # polkit 규칙, systemd 서비스, 실제 환경 테스트 스크립트 (Rocky 용)
+└── docs/                # SPEC(명세), TASKS(작업 순서), DECISIONS(보충 결정), DEPLOY, TEST-CHECKLIST, TEST-RESULT, CHECK(대조표)
 ```
 
 ## 문서
@@ -123,3 +125,4 @@ nm-web/
 - [docs/CHECK.md](docs/CHECK.md) — 명세 대조표 (기능·보안이 어디에 구현됐는지)
 - [docs/DEPLOY.md](docs/DEPLOY.md) — Rocky 배포 안내
 - [docs/TEST-CHECKLIST.md](docs/TEST-CHECKLIST.md) — VMware 확인표
+- [docs/TEST-RESULT.md](docs/TEST-RESULT.md) — **실제 환경(Rocky 9.8 VMware) 테스트 결과**: 54개 중 53개 자동 통과 + 화면 확인 9개 통과, 실패 0개

@@ -20,7 +20,7 @@ const CHANGE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 // 공통 응답 형식의 실패 응답 (SPEC 6장)
 export function sendFail(res, status, hint, extra = {}) {
-  res.status(status).json({ ok: false, error: extra.error ?? null, hint, ...extra });
+  res.status(status).json({ ok: false, error: null, hint, nmcli: null, ...extra }); // nmcli 는 실행하지 않음
 }
 
 // 토큰 비교: 길이·내용에 따라 걸리는 시간이 달라지지 않게 해시 후 timingSafeEqual
